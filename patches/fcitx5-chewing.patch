@@ -1,0 +1,247 @@
+diff --git a/src/eim.cpp b/src/eim.cpp
+index dd1fd45..f7114f0 100644
+--- a/src/eim.cpp
++++ b/src/eim.cpp
+@@ -29,6 +29,7 @@
+ #include <fcitx/userinterface.h>
+ #include <fcitx/userinterfacemanager.h>
+ #include <filesystem>
++#include <fstream>
+ #include <memory>
+ #include <stdexcept>
+ #include <string>
+@@ -73,6 +74,20 @@ DEFINE_SAFE_CHEWING_STRING_GETTER(buffer);
+ DEFINE_SAFE_CHEWING_STRING_GETTER(bopomofo);
+ DEFINE_SAFE_CHEWING_STRING_GETTER(commit);
+ 
++class AssociationCandidateWord : public CandidateWord {
++public:
++    AssociationCandidateWord(ChewingEngine *engine, std::string text)
++        : CandidateWord(Text(text)), engine_(engine), text_(std::move(text)) {}
++
++    void select(InputContext *inputContext) const override {
++        engine_->selectAssociation(inputContext, text_);
++    }
++
++private:
++    ChewingEngine *engine_;
++    std::string text_;
++};
++
+ class ChewingCandidateWord : public CandidateWord {
+ public:
+     ChewingCandidateWord(ChewingEngine *engine, std::string str, int index)
+@@ -108,7 +123,8 @@ public:
+         }
+ 
+         if (chewing_commit_Check(ctx)) {
+-            inputContext->commitString(safeChewing_commit_String(ctx));
++            engine_->commitWithAssociation(inputContext,
++                                           safeChewing_commit_String(ctx));
+         }
+         engine_->updateUI(inputContext);
+     }
+@@ -305,6 +321,7 @@ ChewingEngine::ChewingEngine(Instance *instance)
+     : instance_(instance), context_(getChewingContext()) {
+     chewing_set_maxChiSymbolLen(context_.get(), CHEWING_MAX_LEN);
+     chewing_set_logger(context_.get(), logger, nullptr);
++    loadAssociations();
+     reloadConfig();
+ }
+ 
+@@ -352,6 +369,8 @@ void ChewingEngine::doReset(InputContextEvent &event) {
+     chewing_clean_preedit_buf(ctx);
+     chewing_clean_bopomofo_buf(ctx);
+     chewing_Reset(ctx);
++    associationCandidates_.clear();
++    associationContext_.clear();
+     updateUI(event.inputContext());
+ }
+ 
+@@ -470,6 +489,8 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
+         return;
+     }
+ 
++    associationCandidates_.clear();
++
+     int chewingReturnValue = 0;
+     if (keyEvent.key().check(FcitxKey_space)) {
+         chewingReturnValue = chewing_handle_Space(ctx);
+@@ -560,7 +581,7 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
+     }
+     if (chewing_commit_Check(ctx)) {
+         keyEvent.filterAndAccept();
+-        ic->commitString(safeChewing_commit_String(ctx));
++        commitWithAssociation(ic, safeChewing_commit_String(ctx));
+     }
+     updateUI(ic);
+ }
+@@ -654,10 +675,126 @@ void ChewingEngine::updateUI(InputContext *ic) {
+         ic->inputPanel().setCandidateList(nullptr);
+     }
+ 
++    auto associations = associationCandidates_;
++    if (associations.empty() && !chewing_bopomofo_Check(context_.get())) {
++        associations = associationsFor(associationContext_ +
++                                       safeChewing_buffer_String(context_.get()));
++    }
++    if (!ic->inputPanel().candidateList() && !associations.empty() &&
++        !chewing_bopomofo_Check(context_.get())) {
++        auto candidateList = std::make_unique<CommonCandidateList>();
++        candidateList->setPageSize(10);
++        candidateList->setLayoutHint(CandidateLayoutHint::Horizontal);
++        candidateList->setCursorIncludeUnselected(true);
++        for (const auto &candidate : associations) {
++            candidateList->append<AssociationCandidateWord>(this, candidate);
++        }
++        ic->inputPanel().setCandidateList(std::move(candidateList));
++    }
++
+     updatePreedit(ic);
+     ic->updateUserInterface(UserInterfaceComponent::InputPanel);
+ }
+ 
++void ChewingEngine::commitWithAssociation(InputContext *ic, std::string text) {
++    if (text.empty()) {
++        associationCandidates_.clear();
++        return;
++    }
++    ic->commitString(text);
++    appendAssociationContext(text);
++    associationCandidates_ = associationsFor(associationContext_);
++}
++
++void ChewingEngine::selectAssociation(InputContext *ic, std::string text) {
++    if (chewing_buffer_Check(context_.get()) &&
++        chewing_commit_preedit_buf(context_.get()) == 0) {
++        const auto preedit = safeChewing_commit_String(context_.get());
++        if (!preedit.empty()) {
++            ic->commitString(preedit);
++            appendAssociationContext(preedit);
++        }
++    }
++    commitWithAssociation(ic, std::move(text));
++    updateUI(ic);
++}
++
++void ChewingEngine::loadAssociations() {
++    const auto path = StandardPaths::global().locate(
++        StandardPathsType::Data, "libchewing/associations.tsv");
++    if (path.empty()) {
++        return;
++    }
++
++    std::ifstream input(path);
++    if (!input) {
++        return;
++    }
++
++    associations_.reserve(85000);
++    std::string line;
++    while (std::getline(input, line)) {
++        if (line.empty() || line.front() == '#') {
++            continue;
++        }
++        const auto firstTab = line.find('\t');
++        if (firstTab == std::string::npos) {
++            continue;
++        }
++        auto &candidates = associations_[line.substr(0, firstTab)];
++        size_t start = firstTab + 1;
++        while (start < line.size()) {
++            const auto end = line.find('\t', start);
++            candidates.emplace_back(line.substr(start, end - start));
++            if (end == std::string::npos) {
++                break;
++            }
++            start = end + 1;
++        }
++    }
++}
++
++std::vector<std::string>
++ChewingEngine::associationsFor(std::string_view text) const {
++    std::vector<size_t> characterStarts;
++    size_t start = text.size();
++    while (start > 0 && characterStarts.size() < 4) {
++        --start;
++        while (start > 0 &&
++               (static_cast<unsigned char>(text[start]) & 0xc0) == 0x80) {
++            --start;
++        }
++        characterStarts.push_back(start);
++    }
++
++    for (auto iter = characterStarts.rbegin(); iter != characterStarts.rend();
++         ++iter) {
++        const auto association = associations_.find(std::string(text.substr(*iter)));
++        if (association != associations_.end()) {
++            return association->second;
++        }
++    }
++    return {};
++}
++
++void ChewingEngine::appendAssociationContext(std::string_view text) {
++    associationContext_.append(text);
++    size_t start = associationContext_.size();
++    int characters = 0;
++    while (start > 0 && characters < 4) {
++        --start;
++        while (start > 0 &&
++               (static_cast<unsigned char>(associationContext_[start]) & 0xc0) ==
++                   0x80) {
++            --start;
++        }
++        ++characters;
++    }
++    if (start > 0) {
++        associationContext_.erase(0, start);
++    }
++}
++
+ void ChewingEngine::flushBuffer(InputContextEvent &event) {
+     auto *ctx = context_.get();
+     std::string text;
+diff --git a/src/eim.h b/src/eim.h
+index 334d363..186e8bf 100644
+--- a/src/eim.h
++++ b/src/eim.h
+@@ -27,6 +27,8 @@
+ #include <fcitx/instance.h>
+ #include <fcitx/text.h>
+ #include <string>
++#include <string_view>
++#include <unordered_map>
+ #include <vector>
+ 
+ namespace fcitx {
+@@ -205,6 +207,8 @@ public:
+     void updateUI(InputContext *ic);
+     void updatePreedit(InputContext *ic);
+     Text getPreedit(InputContext *ic);
++    void commitWithAssociation(InputContext *ic, std::string text);
++    void selectAssociation(InputContext *ic, std::string text);
+ 
+     void flushBuffer(InputContextEvent &event);
+     void doReset(InputContextEvent &event);
+@@ -213,6 +217,9 @@ public:
+ 
+ private:
+     bool handleCandidateKeyEvent(const KeyEvent &keyEvent) const;
++    void loadAssociations();
++    std::vector<std::string> associationsFor(std::string_view text) const;
++    void appendAssociationContext(std::string_view text);
+     void updatePreeditImpl(InputContext *ic);
+ 
+     FCITX_ADDON_DEPENDENCY_LOADER(chttrans, instance_->addonManager());
+@@ -222,6 +229,9 @@ private:
+     ChewingConfig config_;
+     UniqueCPtr<ChewingContext, chewing_delete> context_;
+     TrackableObjectReference<InputContext> ic_;
++    std::unordered_map<std::string, std::vector<std::string>> associations_;
++    std::vector<std::string> associationCandidates_;
++    std::string associationContext_;
+ };
+ 
+ class ChewingEngineFactory : public AddonFactory {

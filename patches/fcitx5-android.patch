@@ -1,0 +1,145 @@
+diff --git a/app/src/main/java/org/fcitx/fcitx5/android/input/keyboard/KeyboardWindow.kt b/app/src/main/java/org/fcitx/fcitx5/android/input/keyboard/KeyboardWindow.kt
+index 26dcded0..7f309f02 100644
+--- a/app/src/main/java/org/fcitx/fcitx5/android/input/keyboard/KeyboardWindow.kt
++++ b/app/src/main/java/org/fcitx/fcitx5/android/input/keyboard/KeyboardWindow.kt
+@@ -68,10 +68,12 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
+     private val keyboards: HashMap<String, BaseKeyboard> by lazy {
+         hashMapOf(
+             TextKeyboard.Name to TextKeyboard(context, theme),
++            Eten41Keyboard.Name to Eten41Keyboard(context, theme),
+             NumberKeyboard.Name to NumberKeyboard(context, theme)
+         )
+     }
+     private var currentKeyboardName = ""
++    private var useEten41 = false
+     private var lastSymbolType: String by AppPrefs.getInstance().internal.lastSymbolLayout
+ 
+     private val currentKeyboard: BaseKeyboard? get() = keyboards[currentKeyboardName]
+@@ -117,7 +119,8 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
+     }
+ 
+     fun switchLayout(to: String, remember: Boolean = true) {
+-        val target = to.ifEmpty { lastSymbolType }
++        val requested = to.ifEmpty { lastSymbolType }
++        val target = if (requested == TextKeyboard.Name && useEten41) Eten41Keyboard.Name else requested
+         ContextCompat.getMainExecutor(service).execute {
+             if (keyboards.containsKey(target)) {
+                 if (remember && target != TextKeyboard.Name) {
+@@ -142,13 +145,23 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
+         val targetLayout = when (info.inputType and InputType.TYPE_MASK_CLASS) {
+             InputType.TYPE_CLASS_NUMBER -> NumberKeyboard.Name
+             InputType.TYPE_CLASS_PHONE -> NumberKeyboard.Name
+-            else -> TextKeyboard.Name
++            else -> if (useEten41) Eten41Keyboard.Name else TextKeyboard.Name
+         }
+         switchLayout(targetLayout, remember = false)
+     }
+ 
+     override fun onImeUpdate(ime: InputMethodEntry) {
+-        currentKeyboard?.onInputMethodUpdate(ime)
++        useEten41 = ime.uniqueName == "chewing"
++        val textLayout = if (useEten41) Eten41Keyboard.Name else TextKeyboard.Name
++        if (currentKeyboardName == TextKeyboard.Name || currentKeyboardName == Eten41Keyboard.Name) {
++            if (currentKeyboardName == textLayout) {
++                currentKeyboard?.onInputMethodUpdate(ime)
++            } else {
++                switchLayout(textLayout, remember = false)
++            }
++        } else {
++            currentKeyboard?.onInputMethodUpdate(ime)
++        }
+     }
+ 
+     override fun onPunctuationUpdate(mapping: Map<String, String>) {
+@@ -183,4 +196,4 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
+     private fun notifyBarLayoutChanged() {
+         bar.onKeyboardLayoutSwitched(currentKeyboardName == NumberKeyboard.Name)
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/res/values-zh-rTW/strings.xml b/app/src/main/res/values-zh-rTW/strings.xml
+index fa9bc4e7..7a0b56d8 100644
+--- a/app/src/main/res/values-zh-rTW/strings.xml
++++ b/app/src/main/res/values-zh-rTW/strings.xml
+@@ -1,7 +1,7 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+     <string name="app_name_release">小企鵝輸入法</string>
+-    <string name="app_name_debug">小企鵝輸入法 (除錯)</string>
++    <string name="app_name_debug">小企鵝輸入法（倚天 41 穩定版）</string>
+     <string name="save">儲存</string>
+     <string name="input_methods">輸入法</string>
+     <string name="add_input_method">新增輸入法</string>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index fe1fd3a0..fe73850b 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -1,7 +1,7 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+     <string name="app_name_release">Fcitx5</string>
+-    <string name="app_name_debug">Fcitx5 (Debug)</string>
++    <string name="app_name_debug">Fcitx5 (Eten 41 Stable)</string>
+     <string name="save">Save</string>
+     <string name="input_methods">Input Methods</string>
+     <string name="add_input_method">Add Input Method</string>
+diff --git a/build-logic/convention/src/main/kotlin/NativeLibConventionPlugin.kt b/build-logic/convention/src/main/kotlin/NativeLibConventionPlugin.kt
+index 3aa17e54..c89613c8 100644
+--- a/build-logic/convention/src/main/kotlin/NativeLibConventionPlugin.kt
++++ b/build-logic/convention/src/main/kotlin/NativeLibConventionPlugin.kt
+@@ -17,11 +17,6 @@ class NativeLibConventionPlugin : NativeBaseConventionPlugin() {
+         target.pluginManager.apply(target.libs.plugins.android.library.get().pluginId)
+ 
+         target.extensions.configure<LibraryExtension> {
+-            packaging {
+-                jniLibs {
+-                    excludes.add("**/*.so")
+-                }
+-            }
+             buildFeatures {
+                 prefab = true
+                 prefabPublishing = true
+diff --git a/plugin/chewing/build.gradle.kts b/plugin/chewing/build.gradle.kts
+index eba9ba9e..b6f22ecd 100644
+--- a/plugin/chewing/build.gradle.kts
++++ b/plugin/chewing/build.gradle.kts
+@@ -10,6 +10,10 @@ plugins {
+ android {
+     namespace = "org.fcitx.fcitx5.android.plugin.chewing"
+ 
++    sourceSets {
++        getByName("main").assets.directories.add("src/main/association")
++    }
++
+     defaultConfig {
+         applicationId = "org.fcitx.fcitx5.android.plugin.chewing"
+ 
+diff --git a/plugin/chewing/src/main/res/values-zh-rTW/strings.xml b/plugin/chewing/src/main/res/values-zh-rTW/strings.xml
+index cf453768..21076b24 100644
+--- a/plugin/chewing/src/main/res/values-zh-rTW/strings.xml
++++ b/plugin/chewing/src/main/res/values-zh-rTW/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name_debug">小企鵝輸入法（新酷音外掛程式 | 除錯模式）</string>
++    <string name="app_name_debug">小企鵝輸入法（倚天 41 穩定版新酷音）</string>
+     <string name="app_name_release">小企鵝輸入法（新酷音外掛程式）</string>
+     <string name="description">新酷音（注音輸入法）引擎支援</string>
+-</resources>
+\ No newline at end of file
++</resources>
+diff --git a/plugin/chewing/src/main/res/values/strings.xml b/plugin/chewing/src/main/res/values/strings.xml
+index 51dc190d..ccd1dce6 100644
+--- a/plugin/chewing/src/main/res/values/strings.xml
++++ b/plugin/chewing/src/main/res/values/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name_debug">Fcitx5 (Chewing Plugin | Debug)</string>
++    <string name="app_name_debug">Fcitx5 (Eten 41 Stable Chewing Plugin)</string>
+     <string name="app_name_release">Fcitx5 (Chewing Plugin)</string>
+     <string name="description">Chewing (Zhuyin/Bopomofo input method) engine support for Fcitx5</string>
+-</resources>
+\ No newline at end of file
++</resources>
