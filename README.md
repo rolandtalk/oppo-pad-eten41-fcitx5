@@ -11,6 +11,7 @@ Tested on an OPPO Pad mini (`arm64-v8a`).
 ## Features
 
 - Windows-style Eten 41 virtual-key arrangement, including the number row.
+- Tap the `,` / `ㄓ` key for `ㄓ`; long-press or swipe it for a literal comma.
 - Automatically uses the Eten layout while the Chewing input method is active.
 - Related-character candidates appear immediately after a completed syllable.
 - Typing the next Zhuyin key continues the phrase without requiring a candidate tap.

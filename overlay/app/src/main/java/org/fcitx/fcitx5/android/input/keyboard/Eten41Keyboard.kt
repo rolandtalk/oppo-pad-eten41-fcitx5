@@ -20,7 +20,11 @@ class Eten41Keyboard(
     companion object {
         const val Name = "Eten41"
 
-        private fun key(pcKey: String, bopomofo: String = "") = KeyDef(
+        private fun key(
+            pcKey: String,
+            bopomofo: String = "",
+            literalGesture: String? = null
+        ) = KeyDef(
             KeyDef.Appearance.AltText(
                 displayText = pcKey,
                 altText = bopomofo,
@@ -30,7 +34,13 @@ class Eten41Keyboard(
                     else -> 0.077f
                 }
             ),
-            setOf(KeyDef.Behavior.Press(KeyAction.FcitxKeyAction(pcKey))),
+            buildSet {
+                add(KeyDef.Behavior.Press(KeyAction.FcitxKeyAction(pcKey)))
+                literalGesture?.let {
+                    add(KeyDef.Behavior.LongPress(KeyAction.CommitAction(it)))
+                    add(KeyDef.Behavior.Swipe(KeyAction.CommitAction(it)))
+                }
+            },
             arrayOf(KeyDef.Popup.AltPreview(pcKey, bopomofo))
         )
 
@@ -53,7 +63,7 @@ class Eten41Keyboard(
             ),
             listOf(
                 key("z", "ㄠ"), key("x", "ㄨ"), key("c", "ㄒ"), key("v", "ㄍ"),
-                key("b", "ㄅ"), key("n", "ㄋ"), key("m", "ㄇ"), key(",", "ㄓ"),
+                key("b", "ㄅ"), key("n", "ㄋ"), key("m", "ㄇ"), key(",", "ㄓ", ","),
                 key(".", "ㄔ"), key("/", "ㄕ")
             ),
             listOf(
