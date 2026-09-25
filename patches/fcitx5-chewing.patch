@@ -58,16 +58,28 @@ index dd1fd45..f7114f0 100644
      updateUI(event.inputContext());
  }
  
-@@ -470,6 +489,8 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
+@@ -470,6 +489,9 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
          return;
      }
  
 +    associationCandidates_.clear();
 +
      int chewingReturnValue = 0;
++    const bool hadBopomofo = !safeChewing_bopomofo_String(ctx).empty();
      if (keyEvent.key().check(FcitxKey_space)) {
          chewingReturnValue = chewing_handle_Space(ctx);
-@@ -560,7 +581,7 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
+@@ -552,3 +574,10 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
++    // Tone keys finish the current syllable. Open Chewing's homophone list
++    // immediately so the touch keyboard behaves like the Windows Eten IME.
++    if (hadBopomofo && safeChewing_bopomofo_String(ctx).empty() &&
++        chewing_buffer_Check(ctx)) {
++        chewing_handle_Down(ctx);
++    }
++
+     CHEWING_DEBUG() << "Chewing return value: " << chewingReturnValue;
+     if (chewing_keystroke_CheckIgnore(ctx)) {
+         CHEWING_DEBUG() << "Keystroke ignored";
+@@ -560,7 +589,7 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
      }
      if (chewing_commit_Check(ctx)) {
          keyEvent.filterAndAccept();
@@ -76,7 +88,7 @@ index dd1fd45..f7114f0 100644
      }
      updateUI(ic);
  }
-@@ -654,10 +675,126 @@ void ChewingEngine::updateUI(InputContext *ic) {
+@@ -654,10 +683,126 @@ void ChewingEngine::updateUI(InputContext *ic) {
          ic->inputPanel().setCandidateList(nullptr);
      }
  
