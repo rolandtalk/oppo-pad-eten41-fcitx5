@@ -101,20 +101,25 @@ index 3aa17e54..c89613c8 100644
                  prefab = true
                  prefabPublishing = true
 diff --git a/plugin/chewing/build.gradle.kts b/plugin/chewing/build.gradle.kts
-index eba9ba9e..b6f22ecd 100644
+index eba9ba9e..6584b0d7 100644
 --- a/plugin/chewing/build.gradle.kts
 +++ b/plugin/chewing/build.gradle.kts
-@@ -10,6 +10,10 @@ plugins {
- android {
-     namespace = "org.fcitx.fcitx5.android.plugin.chewing"
+@@ -47,6 +47,15 @@ android {
+     }
+ }
  
-+    sourceSets {
-+        getByName("main").assets.directories.add("src/main/association")
-+    }
++val syncAssociationData by tasks.registering(Copy::class) {
++    from("src/main/association")
++    into("src/main/assets")
++}
 +
-     defaultConfig {
-         applicationId = "org.fcitx.fcitx5.android.plugin.chewing"
- 
++tasks.named("generateDataDescriptor") {
++    dependsOn(syncAssociationData)
++}
++
+ fcitxComponent {
+     installPrebuiltAssets = true
+ }
 diff --git a/plugin/chewing/src/main/res/values-zh-rTW/strings.xml b/plugin/chewing/src/main/res/values-zh-rTW/strings.xml
 index cf453768..21076b24 100644
 --- a/plugin/chewing/src/main/res/values-zh-rTW/strings.xml
