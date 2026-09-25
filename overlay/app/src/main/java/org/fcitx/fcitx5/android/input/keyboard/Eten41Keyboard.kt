@@ -59,12 +59,12 @@ class Eten41Keyboard(
             listOf(
                 key("a", "ㄚ"), key("s", "ㄙ"), key("d", "ㄉ"), key("f", "ㄈ"),
                 key("g", "ㄐ"), key("h", "ㄏ"), key("j", "ㄖ"), key("k", "ㄎ"),
-                key("l", "ㄌ"), key(";", "ㄗ"), key("'", "ㄘ")
+                key("l", "ㄌ"), key(";", "ㄗ", ";"), key("'", "ㄘ", "'")
             ),
             listOf(
                 key("z", "ㄠ"), key("x", "ㄨ"), key("c", "ㄒ"), key("v", "ㄍ"),
                 key("b", "ㄅ"), key("n", "ㄋ"), key("m", "ㄇ"), key(",", "ㄓ", ","),
-                key(".", "ㄔ"), key("/", "ㄕ")
+                key(".", "ㄔ", "."), key("/", "ㄕ", "/")
             ),
             listOf(
                 LayoutSwitchKey("?123", ""), LanguageKey(), SpaceKey(), ReturnKey()
