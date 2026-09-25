@@ -1,5 +1,5 @@
 diff --git a/src/eim.cpp b/src/eim.cpp
-index dd1fd45..f7114f0 100644
+index dd1fd45..5ab0891 100644
 --- a/src/eim.cpp
 +++ b/src/eim.cpp
 @@ -29,6 +29,7 @@
@@ -31,7 +31,14 @@ index dd1fd45..f7114f0 100644
  class ChewingCandidateWord : public CandidateWord {
  public:
      ChewingCandidateWord(ChewingEngine *engine, std::string str, int index)
-@@ -108,7 +123,8 @@ public:
+@@ -102,13 +117,15 @@ public:
+         }
+         chewing_handle_Default(ctx, builtin_selectkeys[static_cast<int>(
+                                         *engine_->config().SelectionKey)][off]);
++        engine_->clearAutomaticCandidateSelection();
+ 
+         if (chewing_keystroke_CheckIgnore(ctx)) {
+             return;
          }
  
          if (chewing_commit_Check(ctx)) {
@@ -41,7 +48,7 @@ index dd1fd45..f7114f0 100644
          }
          engine_->updateUI(inputContext);
      }
-@@ -305,6 +321,7 @@ ChewingEngine::ChewingEngine(Instance *instance)
+@@ -305,6 +322,7 @@ ChewingEngine::ChewingEngine(Instance *instance)
      : instance_(instance), context_(getChewingContext()) {
      chewing_set_maxChiSymbolLen(context_.get(), CHEWING_MAX_LEN);
      chewing_set_logger(context_.get(), logger, nullptr);
@@ -49,16 +56,33 @@ index dd1fd45..f7114f0 100644
      reloadConfig();
  }
  
-@@ -352,6 +369,8 @@ void ChewingEngine::doReset(InputContextEvent &event) {
+@@ -352,6 +370,9 @@ void ChewingEngine::doReset(InputContextEvent &event) {
      chewing_clean_preedit_buf(ctx);
      chewing_clean_bopomofo_buf(ctx);
      chewing_Reset(ctx);
 +    associationCandidates_.clear();
 +    associationContext_.clear();
++    automaticCandidateSelection_ = false;
      updateUI(event.inputContext());
  }
  
-@@ -470,6 +489,9 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
+@@ -465,12 +486,25 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
+     chewing_set_easySymbolInput(ctx, 0);
+     CHEWING_DEBUG() << "KeyEvent: " << keyEvent.key().toString();
+ 
+-    if (handleCandidateKeyEvent(keyEvent)) {
++    // The homophone list opened after a tone key is informational on touch
++    // keyboards. Typing another phonetic key should continue the phrase.
++    const bool continueAfterAutomaticCandidates =
++        automaticCandidateSelection_ && keyEvent.key().isSimple();
++    if (continueAfterAutomaticCandidates) {
++        chewing_cand_close(ctx);
++        automaticCandidateSelection_ = false;
++    }
++
++    if (!continueAfterAutomaticCandidates &&
++        handleCandidateKeyEvent(keyEvent)) {
+         keyEvent.filterAndAccept();
          return;
      }
  
@@ -68,18 +92,23 @@ index dd1fd45..f7114f0 100644
 +    const bool hadBopomofo = !safeChewing_bopomofo_String(ctx).empty();
      if (keyEvent.key().check(FcitxKey_space)) {
          chewingReturnValue = chewing_handle_Space(ctx);
-@@ -552,3 +574,10 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
+     } else if (keyEvent.key().check(FcitxKey_Tab)) {
+@@ -549,6 +583,14 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
+         return;
+     }
+ 
 +    // Tone keys finish the current syllable. Open Chewing's homophone list
 +    // immediately so the touch keyboard behaves like the Windows Eten IME.
 +    if (hadBopomofo && safeChewing_bopomofo_String(ctx).empty() &&
 +        chewing_buffer_Check(ctx)) {
 +        chewing_handle_Down(ctx);
++        automaticCandidateSelection_ = true;
 +    }
 +
      CHEWING_DEBUG() << "Chewing return value: " << chewingReturnValue;
      if (chewing_keystroke_CheckIgnore(ctx)) {
          CHEWING_DEBUG() << "Keystroke ignored";
-@@ -560,7 +589,7 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
+@@ -560,7 +602,7 @@ void ChewingEngine::keyEvent(const InputMethodEntry &entry,
      }
      if (chewing_commit_Check(ctx)) {
          keyEvent.filterAndAccept();
@@ -88,14 +117,14 @@ index dd1fd45..f7114f0 100644
      }
      updateUI(ic);
  }
-@@ -654,10 +683,126 @@ void ChewingEngine::updateUI(InputContext *ic) {
+@@ -654,10 +696,127 @@ void ChewingEngine::updateUI(InputContext *ic) {
          ic->inputPanel().setCandidateList(nullptr);
      }
  
 +    auto associations = associationCandidates_;
 +    if (associations.empty() && !chewing_bopomofo_Check(context_.get())) {
-+        associations = associationsFor(associationContext_ +
-+                                       safeChewing_buffer_String(context_.get()));
++        associations = associationsFor(
++            associationContext_ + safeChewing_buffer_String(context_.get()));
 +    }
 +    if (!ic->inputPanel().candidateList() && !associations.empty() &&
 +        !chewing_bopomofo_Check(context_.get())) {
@@ -186,7 +215,8 @@ index dd1fd45..f7114f0 100644
 +
 +    for (auto iter = characterStarts.rbegin(); iter != characterStarts.rend();
 +         ++iter) {
-+        const auto association = associations_.find(std::string(text.substr(*iter)));
++        const auto association =
++            associations_.find(std::string(text.substr(*iter)));
 +        if (association != associations_.end()) {
 +            return association->second;
 +        }
@@ -201,8 +231,8 @@ index dd1fd45..f7114f0 100644
 +    while (start > 0 && characters < 4) {
 +        --start;
 +        while (start > 0 &&
-+               (static_cast<unsigned char>(associationContext_[start]) & 0xc0) ==
-+                   0x80) {
++               (static_cast<unsigned char>(associationContext_[start]) &
++                0xc0) == 0x80) {
 +            --start;
 +        }
 +        ++characters;
@@ -216,7 +246,7 @@ index dd1fd45..f7114f0 100644
      auto *ctx = context_.get();
      std::string text;
 diff --git a/src/eim.h b/src/eim.h
-index 334d363..186e8bf 100644
+index 334d363..6709288 100644
 --- a/src/eim.h
 +++ b/src/eim.h
 @@ -27,6 +27,8 @@
@@ -228,16 +258,19 @@ index 334d363..186e8bf 100644
  #include <vector>
  
  namespace fcitx {
-@@ -205,6 +207,8 @@ public:
+@@ -205,6 +207,11 @@ public:
      void updateUI(InputContext *ic);
      void updatePreedit(InputContext *ic);
      Text getPreedit(InputContext *ic);
 +    void commitWithAssociation(InputContext *ic, std::string text);
 +    void selectAssociation(InputContext *ic, std::string text);
++    void clearAutomaticCandidateSelection() {
++        automaticCandidateSelection_ = false;
++    }
  
      void flushBuffer(InputContextEvent &event);
      void doReset(InputContextEvent &event);
-@@ -213,6 +217,9 @@ public:
+@@ -213,6 +220,9 @@ public:
  
  private:
      bool handleCandidateKeyEvent(const KeyEvent &keyEvent) const;
@@ -247,13 +280,65 @@ index 334d363..186e8bf 100644
      void updatePreeditImpl(InputContext *ic);
  
      FCITX_ADDON_DEPENDENCY_LOADER(chttrans, instance_->addonManager());
-@@ -222,6 +229,9 @@ private:
+@@ -222,6 +232,10 @@ private:
      ChewingConfig config_;
      UniqueCPtr<ChewingContext, chewing_delete> context_;
      TrackableObjectReference<InputContext> ic_;
 +    std::unordered_map<std::string, std::vector<std::string>> associations_;
 +    std::vector<std::string> associationCandidates_;
 +    std::string associationContext_;
++    bool automaticCandidateSelection_ = false;
  };
  
  class ChewingEngineFactory : public AddonFactory {
+diff --git a/test/testchewing.cpp b/test/testchewing.cpp
+index 6e29b55..ad15a8b 100644
+--- a/test/testchewing.cpp
++++ b/test/testchewing.cpp
+@@ -151,6 +151,38 @@ void testBackspaceWithBuffer(Instance *instance) {
+     });
+ }
+ 
++void testContinueAfterAutomaticCandidates(Instance *instance) {
++    instance->eventDispatcher().schedule([instance]() {
++        auto *chewing = instance->addonManager().addon("chewing", true);
++        FCITX_ASSERT(chewing);
++        RawConfig config;
++        config.setValueByPath("Layout", "Default");
++        chewing->setConfig(config);
++        auto *testfrontend = instance->addonManager().addon("testfrontend");
++        auto uuid =
++            testfrontend->call<ITestFrontend::createInputContext>("testapp");
++        auto *ic = instance->inputContextManager().findByUUID(uuid);
++        FCITX_ASSERT(testfrontend->call<ITestFrontend::sendKeyEvent>(
++            uuid, Key("Control+space"), false));
++        FCITX_ASSERT(instance->inputMethod(ic) == "chewing");
++
++        FCITX_ASSERT(testfrontend->call<ITestFrontend::sendKeyEvent>(
++            uuid, Key("z"), false));
++        FCITX_ASSERT(testfrontend->call<ITestFrontend::sendKeyEvent>(
++            uuid, Key("p"), false));
++        FCITX_ASSERT(testfrontend->call<ITestFrontend::sendKeyEvent>(
++            uuid, Key("space"), false));
++        FCITX_ASSERT(ic->inputPanel().candidateList());
++
++        FCITX_ASSERT(testfrontend->call<ITestFrontend::sendKeyEvent>(
++            uuid, Key("z"), false));
++        FCITX_ASSERT(ic->inputPanel().preedit().toString().find("ㄈ") !=
++                     std::string::npos);
++
++        instance->deactivate();
++    });
++}
++
+ void testBackspaceWhenBufferEmpty(Instance *instance) {
+     instance->eventDispatcher().schedule([instance]() {
+         auto *chewing = instance->addonManager().addon("chewing", true);
+@@ -282,6 +314,7 @@ int main() {
+     instance.addonManager().registerDefaultLoader(nullptr);
+ 
+     testBasic(&instance);
++    testContinueAfterAutomaticCandidates(&instance);
+     testBackspaceWhenBufferEmpty(&instance);
+     testBackspaceWithBuffer(&instance);
+     testBackspaceWithBopomofo(&instance);

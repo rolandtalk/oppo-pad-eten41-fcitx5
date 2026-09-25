@@ -13,6 +13,7 @@ Tested on an OPPO Pad mini (`arm64-v8a`).
 - Windows-style Eten 41 virtual-key arrangement, including the number row.
 - Automatically uses the Eten layout while the Chewing input method is active.
 - Related-character candidates appear immediately after a completed syllable.
+- Typing the next Zhuyin key continues the phrase without requiring a candidate tap.
 - Associations are generated from the official Chewing `tsi.csv` phrase
   dictionary and ranked by its frequency values.
 - About 85,000 contexts, up to eight candidates per context, with as many as
@@ -83,4 +84,3 @@ This repository is an unofficial derivative of Fcitx5 for Android,
 fcitx5-chewing, and Chewing dictionary data. The modifications and generated
 dictionary index are distributed under `LGPL-2.1-or-later`. Upstream projects
 retain their respective copyrights and licenses. See [NOTICE.md](NOTICE.md).
-
