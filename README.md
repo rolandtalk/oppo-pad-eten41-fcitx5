@@ -76,6 +76,7 @@ The generated index is included at
 
 ## Project Layout
 
+- `CHANGELOG.md`: dated summaries of user-visible changes.
 - `patches/fcitx5-android.patch`: Android keyboard integration and packaging.
 - `patches/fcitx5-chewing.patch`: association loading and candidate behavior.
 - `overlay/`: new source files and generated dictionary data.
